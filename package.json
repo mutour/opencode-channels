@@ -1,6 +1,13 @@
 {
-  "name": "opencode-channels",
+  "name": "@mutour/opencode-channels",
   "version": "1.0.0",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mutour/opencode-channels.git"
+  },
   "description": "Gateway application bridging Feishu/Lark with the OpenCode engine.",
   "main": "src/index.js",
   "bin": {

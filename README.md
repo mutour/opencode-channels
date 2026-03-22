@@ -24,31 +24,53 @@ With this project, users can send commands directly to OpenCode from their Feish
 
 ## Installation & Usage
 
-1. Install dependencies:
+You can install and use `opencode-channels` either locally or globally. We recommend global installation to use the CLI commands easily from anywhere.
+
+### Option 1: Global Installation (Recommended)
+
+1. **Configure npm to access GitHub Packages**:
+   Since this package is hosted on the GitHub Packages registry, you need to configure your environment first. If you haven't already, add the following to your `~/.npmrc` file:
    ```bash
-   npm install
+   @mutour:registry=https://npm.pkg.github.com
+   ```
+   *(Note: You will also need to be authenticated with `npm login --registry=https://npm.pkg.github.com` using a GitHub Personal Access Token if the package is private).*
+
+2. **Install globally**:
+   ```bash
+   npm install -g @mutour/opencode-channels
    ```
 
-2. Initialize configuration interactively (Feishu App ID and App Secret):
+3. **Initialize configuration** interactively (requires your Feishu App ID and App Secret):
    ```bash
-   npm run setup
+   oc-channels setup
    ```
 
-### Basic Management
-You can use the following `npm run` commands to manage the gateway:
+### Option 2: Run via `npx` (No installation required)
 
-- `npm run start`: Start the gateway service in the foreground.
-- `npm run start:daemon`: Start the gateway service in the background.
-- `npm run stop`: Stop the background service.
-- `npm run restart`: Restart the background service.
-- `npm run status`: Check if the gateway and OpenCode engine are currently running.
+If you prefer not to install it globally, you can run it directly using `npx`:
+```bash
+npx @mutour/opencode-channels setup
+```
 
-### Permission Management (`whitelist`)
-When passing arguments to the `whitelist` script, you must include `--` before the arguments:
+---
 
-- `npm run whitelist -- list`: View the current admin, whitelisted users, and unauthorized access logs.
-- `npm run whitelist -- add <userId> [admin]`: Authorize a user. Adding the `admin` parameter grants admin privileges.
-- `npm run whitelist -- remove <userId>`: Remove a user's authorization.
+## Basic Management
+
+Once configured, you can manage the gateway using the `oc-channels` CLI command (or prefix with `npx @mutour/opencode-channels` if using Option 2):
+
+- `oc-channels start`: Start the gateway service in the foreground.
+- `oc-channels start -d`: Start the gateway service in the background (daemon mode).
+- `oc-channels stop`: Stop the background service.
+- `oc-channels restart`: Restart the background service.
+- `oc-channels status`: Check if the gateway and OpenCode engine are currently running.
+
+## Permission Management (`whitelist`)
+
+Use the `whitelist` command to manage user access:
+
+- `oc-channels whitelist list`: View the current admin, whitelisted users, and unauthorized access logs.
+- `oc-channels whitelist add <userId> [admin]`: Authorize a user. Adding the `admin` parameter grants admin privileges.
+- `oc-channels whitelist remove <userId>`: Remove a user's authorization.
 
 ## Writing Custom Gateway Commands
 You can write your own interceptor commands inside the `scripts/` directory. Create a new `.js` file exporting a command structure:
