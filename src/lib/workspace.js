@@ -30,11 +30,25 @@ function getWorkspace() {
         fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
     }
 
+    const defaultScriptsDir = path.join(__dirname, '../../scripts');
+    const userScriptsDir = path.join(workspace, 'scripts');
+    if (fs.existsSync(defaultScriptsDir)) {
+        const scripts = fs.readdirSync(defaultScriptsDir);
+        for (const file of scripts) {
+            if (file.endsWith('.js')) {
+                const targetPath = path.join(userScriptsDir, file);
+                if (!fs.existsSync(targetPath)) {
+                    fs.copyFileSync(path.join(defaultScriptsDir, file), targetPath);
+                }
+            }
+        }
+    }
+
     return {
         root: workspace,
         config: configPath,
         engine: path.join(workspace, 'engine.json'),
-        scripts: path.join(workspace, 'scripts'),
+        scripts: userScriptsDir,
         storage: path.join(workspace, 'storage'),
         logs: path.join(workspace, 'logs')
     };
