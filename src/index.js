@@ -284,10 +284,16 @@ async function runServer() {
         }
 
         if (event.type === 'message.part.delta') {
+            const role = event.role || event.properties?.role || event.part?.role || event.properties?.part?.role;
+            if (role === 'user') return;
+            
             const delta = event.delta || event.properties?.delta || '';
             meta.content += delta;
             updateCard(sid, meta);
         } else if (event.type === 'message.part.updated') {
+            const role = event.role || event.properties?.role || event.part?.role || event.properties?.part?.role;
+            if (role === 'user') return;
+
             const text = event.part?.text || event.properties?.part?.text || '';
             if (text.length > meta.content.length) {
                 meta.content = text;
