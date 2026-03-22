@@ -480,31 +480,36 @@ async function stopProcess() {
     return stopped;
 }
 
+function startDaemon() {
+    if (fs.existsSync(pidFile)) {
+        const pid = fs.readFileSync(pidFile, 'utf8');
+        try {
+            process.kill(parseInt(pid), 0);
+            console.log(chalk.yellow(`Service already running (PID: ${pid})`));
+            return false;
+        } catch (e) {
+            fs.unlinkSync(pidFile);
+        }
+    }
+    const out = fs.openSync(logFile, 'a');
+    const err = fs.openSync(errorLogFile, 'a');
+    const child = spawn(process.argv[0], [process.argv[1], 'internal-run'], {
+        detached: true,
+        stdio: ['ignore', out, err]
+    });
+    fs.writeFileSync(pidFile, child.pid.toString());
+    child.unref();
+    console.log(chalk.green(`✔ Started in background (PID: ${child.pid})`));
+    return true;
+}
+
 program
     .command('start')
-    .description('Start service')
-    .option('-d, --daemon', 'Run in background')
+    .description('Start service in background')
+    .option('-l, --log', 'Run in foreground and show logs')
     .action(async (options) => {
-        if (options.daemon) {
-            if (fs.existsSync(pidFile)) {
-                const pid = fs.readFileSync(pidFile, 'utf8');
-                try {
-                    process.kill(parseInt(pid), 0);
-                    console.log(chalk.yellow(`Service already running (PID: ${pid})`));
-                    return;
-                } catch (e) {
-                    fs.unlinkSync(pidFile);
-                }
-            }
-            const out = fs.openSync(logFile, 'a');
-            const err = fs.openSync(errorLogFile, 'a');
-            const child = spawn(process.argv[0], [process.argv[1], 'internal-run'], {
-                detached: true,
-                stdio: ['ignore', out, err]
-            });
-            fs.writeFileSync(pidFile, child.pid.toString());
-            child.unref();
-            console.log(chalk.green(`✔ Started in background (PID: ${child.pid})`));
+        if (!options.log) {
+            startDaemon();
         } else {
             console.log(boxen(chalk.green('OpenCode Channels'), { padding: 1, borderStyle: 'double' }));
             await runServer();
@@ -525,13 +530,9 @@ program
     .description('Restart service')
     .action(async () => {
         await stopProcess();
-        const child = spawn(process.argv[0], [process.argv[1], 'start', '--daemon'], {
-            detached: true,
-            stdio: 'ignore'
-        });
-        fs.writeFileSync(pidFile, child.pid.toString());
-        child.unref();
-        console.log(chalk.green(`✔ Restarted`));
+        if (startDaemon()) {
+            console.log(chalk.green(`✔ Restarted`));
+        }
     });
 
 program
@@ -593,13 +594,7 @@ program
 
         if (startNow) {
             await stopProcess();
-            const child = spawn(process.argv[0], [process.argv[1], 'start', '--daemon'], {
-                detached: true,
-                stdio: 'ignore'
-            });
-            fs.writeFileSync(pidFile, child.pid.toString());
-            child.unref();
-            console.log(chalk.green(`✔ Started in background (PID: ${child.pid})`));
+            startDaemon();
         }
     });
 

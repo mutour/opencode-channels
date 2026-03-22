@@ -58,8 +58,8 @@ npx @mutour/opencode-channels setup
 
 Once configured, you can manage the gateway using the `oc-channels` CLI command (or prefix with `npx @mutour/opencode-channels` if using Option 2):
 
-- `oc-channels start`: Start the gateway service in the foreground.
-- `oc-channels start -d`: Start the gateway service in the background (daemon mode).
+- `oc-channels start`: Start the gateway service in the background (daemon mode).
+- `oc-channels start -l, --log`: Start the gateway service in the foreground and output logs.
 - `oc-channels stop`: Stop the background service.
 - `oc-channels restart`: Restart the background service.
 - `oc-channels status`: Check if the gateway and OpenCode engine are currently running.
