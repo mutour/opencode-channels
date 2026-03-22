@@ -20,6 +20,10 @@ class OpenCodeBridge {
     listen(onEvent, onError) {
         const es = new EventSource(`${this.baseUrl}/event`);
         
+        es.onopen = () => {
+            console.log(`[SSE] Connected to OpenCode at ${this.baseUrl}/event`);
+        };
+
         const handler = (event) => {
             try {
                 if (!event.data) return;

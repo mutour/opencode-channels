@@ -417,7 +417,7 @@ program
     .argument('[action]', 'add|list|remove', 'list')
     .argument('[id]', 'User ID')
     .argument('[role]', 'admin|user', 'user')
-    .action((action, id, role) => {
+    .action(async (action, id, role) => {
         const security = new SecurityManager(ws.config, ws.storage);
         const configData = security.getConfig();
         if (action === 'list') {
@@ -435,12 +435,40 @@ program
                 }
             }
         } else if (action === 'add' && id) {
+            let success = false;
             if (role === 'admin') {
                 security.setAdmin(id);
                 console.log(chalk.green(`已设置 ${id} 为管理员`));
+                success = true;
             } else {
-                if (security.addToWhitelist(id)) console.log(chalk.green(`已授权 ${id}`));
-                else console.log(chalk.yellow(`${id} 已在授权列表中`));
+                if (security.addToWhitelist(id)) {
+                    console.log(chalk.green(`已授权 ${id}`));
+                    success = true;
+                } else {
+                    console.log(chalk.yellow(`${id} 已在授权列表中`));
+                    success = true;
+                }
+            }
+
+            if (success) {
+                try {
+                    const larkClient = createLarkClient(configData);
+                    const message = role === 'admin' 
+                        ? '您已被授权为管理员，现在可以开始使用了。' 
+                        : '您已被授权访问，现在可以开始使用了。';
+                    
+                    await larkClient.im.message.create({
+                        params: { receive_id_type: 'user_id' },
+                        data: {
+                            receive_id: id,
+                            content: JSON.stringify(CardManager.createServiceCard('🎉 授权成功', message, 'success')),
+                            msg_type: 'interactive',
+                        },
+                    });
+                    console.log(chalk.cyan(`已向用户 ${id} 发送飞书通知`));
+                } catch (err) {
+                    console.error(chalk.red(`[FEISHU ERROR] 无法发送通知: ${err.message}`));
+                }
             }
         } else if (action === 'remove' && id) {
             const config = security.getConfig();
@@ -451,6 +479,7 @@ program
                 console.log(chalk.green(`已移除 ${id} 的授权`));
             }
         }
+        process.exit(0);
     });
 
 program
