@@ -139,14 +139,19 @@ async function runServer() {
                     chat_id: chatId,
                     message_id: messageId,
                     content: '',
-                    lastUpdate: 0
+                    lastUpdate: 0,
+                    connectionLost: false
                 });
 
                 console.log(`[SESSION] Bound ${sessionId} to message ${messageId}`);
                 await bridge.sendPrompt(sessionId, contentText);
             } catch (err) {
                 console.error('[OPCODE ERROR]', err.message);
-                await ctx.replyCard(CardManager.createServiceCard('❌ 服务故障', '连接 OpenCode 失败，请确认服务已启动。', 'failed'));
+                let errorMsg = '连接 OpenCode 失败，请确认服务已启动。';
+                if (err.code === 'ECONNREFUSED' || err.message.includes('ECONNREFUSED')) {
+                    errorMsg = '❌ OpenCode 服务未启动 (ECONNREFUSED)。请在服务器运行 `opencode` 后重试。';
+                }
+                await ctx.replyCard(CardManager.createServiceCard('❌ 服务故障', errorMsg, 'failed'));
             }
         },
         'card.action.trigger': async (data) => {
@@ -221,6 +226,10 @@ async function runServer() {
         if (!sid || !activeSessions.has(sid)) return;
 
         const meta = activeSessions.get(sid);
+        if (meta.connectionLost) {
+            meta.connectionLost = false;
+            console.log(`[SSE] Reconnected for session ${sid}`);
+        }
 
         if (event.type === 'message.part.delta') {
             const delta = event.delta || event.properties?.delta || '';
@@ -245,7 +254,21 @@ async function runServer() {
             activeSessions.delete(sid);
         }
     }, (err) => {
-        console.error('[SSE CONNECTION ERROR]', err.message);
+        const msg = err.message || 'Connection lost';
+        console.error(chalk.red(`[SSE CONNECTION ERROR] ${msg}. Retrying...`));
+        
+        if (msg.includes('ECONNREFUSED')) {
+            for (const meta of activeSessions.values()) {
+                if (meta.connectionLost) continue;
+                meta.connectionLost = true;
+                larkClient.im.message.patch({
+                    path: { message_id: meta.message_id },
+                    data: {
+                        content: JSON.stringify(CardManager.createOpenCodeCard('⚠️ 连接中断', 'OpenCode 服务已断开，正在尝试重连...', 'warning'))
+                    }
+                }).catch(() => {});
+            }
+        }
     });
 
     startWS(config, dispatcher);
@@ -329,6 +352,23 @@ program
         fs.writeFileSync(pidFile, child.pid.toString());
         child.unref();
         console.log(chalk.green(`✔ 已重启`));
+    });
+
+program
+    .command('status')
+    .description('查看服务运行状态')
+    .action(() => {
+        if (fs.existsSync(pidFile)) {
+            const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
+            try {
+                process.kill(pid, 0);
+                console.log(chalk.green(`✔ 服务正在运行 (PID: ${pid})`));
+            } catch (e) {
+                console.log(chalk.yellow(`服务未运行 (但发现残留的 PID 文件: ${pid})`));
+            }
+        } else {
+            console.log(chalk.gray('服务未运行'));
+        }
     });
 
 program

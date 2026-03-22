@@ -12,6 +12,7 @@
     "setup": "node src/index.js setup",
     "start": "node src/index.js start",
     "dev": "node src/index.js start",
+    "status": "node src/index.js status",
     "whitelist": "node src/index.js whitelist",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
