@@ -1,6 +1,6 @@
 {
   "name": "opencode-channels",
-  "version": "1.1.4",
+  "version": "1.0.0",
   "description": "Gateway application bridging Feishu/Lark with the OpenCode engine.",
   "main": "src/index.js",
   "bin": {
