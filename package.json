@@ -12,6 +12,9 @@
   "scripts": {
     "setup": "node src/index.js setup",
     "start": "node src/index.js start",
+    "start:daemon": "node src/index.js start -d",
+    "stop": "node src/index.js stop",
+    "restart": "node src/index.js restart",
     "dev": "node src/index.js start",
     "status": "node src/index.js status",
     "whitelist": "node src/index.js whitelist",

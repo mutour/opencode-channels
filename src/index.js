@@ -48,7 +48,7 @@ async function runServer() {
     const config = securityManager.getConfig();
     
     if (!config.feishu.appId || !config.feishu.appSecret) {
-        console.error(chalk.red('Configuration incomplete, please run first: oc-channels setup'));
+        console.error(chalk.red('Configuration incomplete, please run first: npm run setup'));
         process.exit(1);
     }
 
@@ -204,7 +204,7 @@ async function runServer() {
                 if (!adminId) {
                     await ctx.replyCard(CardManager.createServiceCard(
                         '⚠️ Access Restricted',
-                        `System has no admin configured.\n\nYour User ID: \`${userId}\`\n\nPlease run the following command on the server to authorize:\n\`oc-channels whitelist add ${userId} admin\``,
+                        `System has no admin configured.\n\nYour User ID: \`${userId}\`\n\nPlease run the following command on the server to authorize:\n\`npm run whitelist -- add ${userId} admin\``,
                         'warning'
                     ));
                 } else {
@@ -219,7 +219,7 @@ async function runServer() {
                     } else {
                         await ctx.replyCard(CardManager.createServiceCard(
                             '⚠️ Access Restricted',
-                            `Your account is not authorized.\n\nAdmin has not been activated yet (never sent a message).\nPlease ask the admin to run:\n\`oc-channels whitelist add ${userId}\``,
+                            `Your account is not authorized.\n\nAdmin has not been activated yet (never sent a message).\nPlease ask the admin to run:\n\`npm run whitelist -- add ${userId}\``,
                             'warning'
                         ));
                     }

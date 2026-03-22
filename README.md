@@ -7,10 +7,10 @@ With this project, users can send commands directly to OpenCode from their Feish
 ## Core Workflow
 1. **Message Reception**: Users send messages to the Feishu/Lark bot, which are captured by the gateway via Lark's WebSocket event subscription mechanism (`im.message.receive_v1`).
 2. **Security & Whitelist Flow**:
-   - **Admin Initialization**: There is no default admin when the system runs for the first time. The first user to send a message will receive a prompt card with their `User ID`. An administrator must then run the command `oc-channels whitelist add <userId> admin` on the server to bind the admin account.
+   - **Admin Initialization**: There is no default admin when the system runs for the first time. The first user to send a message will receive a prompt card with their `User ID`. An administrator must then run the command `npm run whitelist -- add <userId> admin` on the server to bind the admin account.
    - **Admin Activation**: Once bound, the admin needs to send any message to the bot to "activate" the session (so the gateway registers the admin's `chat_id`), which is required to receive future authorization requests.
    - **Guest Authorization Request**: When an un-whitelisted user sends a message, and the admin is activated, the gateway will push a **"🔐 Authorization Request"** interactive card to the admin. The admin can click "Approve" or "Deny" directly from the chat.
-   - **Manual Authorization**: If the admin is not activated or prefers CLI, authorization can still be granted via the server command: `oc-channels whitelist add <userId>`.
+   - **Manual Authorization**: If the admin is not activated or prefers CLI, authorization can still be granted via the server command: `npm run whitelist -- add <userId>`.
 3. **Built-in Command Interception**: Messages starting with `#` (e.g., `#help`, `#commands`) are intercepted and handled by the local `CommandRegistry`, and are not forwarded to the OpenCode AI model.
 4. **OpenCode Task Dispatch**:
    - Establishes a new session (`POST /session`).
@@ -24,20 +24,31 @@ With this project, users can send commands directly to OpenCode from their Feish
 
 ## Installation & Usage
 
-### Basic Management
-You can install and link the package globally, or just run the scripts locally.
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-- `npm link` or `npm i -g`: Install globally to use the `oc-channels` command.
-- `oc-channels setup`: Interactively configure your Feishu App ID and App Secret.
-- `oc-channels start [-d]`: Start the gateway service (`-d` for daemon/background mode).
-- `oc-channels stop`: Stop the background service.
-- `oc-channels restart`: Restart the background service.
-- `oc-channels status`: Check if the gateway and OpenCode engine are currently running.
+2. Initialize configuration interactively (Feishu App ID and App Secret):
+   ```bash
+   npm run setup
+   ```
+
+### Basic Management
+You can use the following `npm run` commands to manage the gateway:
+
+- `npm run start`: Start the gateway service in the foreground.
+- `npm run start:daemon`: Start the gateway service in the background.
+- `npm run stop`: Stop the background service.
+- `npm run restart`: Restart the background service.
+- `npm run status`: Check if the gateway and OpenCode engine are currently running.
 
 ### Permission Management (`whitelist`)
-- `oc-channels whitelist list`: View the current admin, whitelisted users, and unauthorized access logs.
-- `oc-channels whitelist add <userId> [admin]`: Authorize a user. Adding the `admin` parameter grants admin privileges.
-- `oc-channels whitelist remove <userId>`: Remove a user's authorization.
+When passing arguments to the `whitelist` script, you must include `--` before the arguments:
+
+- `npm run whitelist -- list`: View the current admin, whitelisted users, and unauthorized access logs.
+- `npm run whitelist -- add <userId> [admin]`: Authorize a user. Adding the `admin` parameter grants admin privileges.
+- `npm run whitelist -- remove <userId>`: Remove a user's authorization.
 
 ## Writing Custom Gateway Commands
 You can write your own interceptor commands inside the `scripts/` directory. Create a new `.js` file exporting a command structure:
