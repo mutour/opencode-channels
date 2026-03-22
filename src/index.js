@@ -58,8 +58,18 @@ async function runServer() {
     async function startOpencodeEngine(cwd) {
         if (opencodeProcess) {
             console.log(chalk.yellow(`[OPCODE] Stopping existing opencode process (PID: ${opencodeProcess.pid})...`));
-            opencodeProcess.kill('SIGTERM');
-            await new Promise(r => setTimeout(r, 1000));
+            try {
+                opencodeProcess.kill('SIGTERM');
+                let count = 0;
+                while (count < 15) {
+                    try {
+                        process.kill(opencodeProcess.pid, 0);
+                        await new Promise(r => setTimeout(r, 200));
+                        count++;
+                    } catch (e) { break; }
+                }
+                try { process.kill(opencodeProcess.pid, 'SIGKILL'); } catch (e) {}
+            } catch (err) {}
         }
 
         console.log(chalk.cyan(`[OPCODE] Starting opencode on port ${opencodePort} in ${cwd}...`));
@@ -145,16 +155,36 @@ async function runServer() {
     const storageManager = new StorageManager(path.join(ws.storage, 'history'));
     const bridge = new OpenCodeBridge('127.0.0.1', opencodePort);
 
-    process.on('SIGTERM', () => {
-        console.log('[CLEANUP] Killing opencode process...');
-        if (opencodeProcess) opencodeProcess.kill('SIGTERM');
+    const shutdown = async () => {
+        console.log('[CLEANUP] Shutting down gateway and OpenCode engine...');
+        if (opencodeProcess) {
+            try {
+                opencodeProcess.kill('SIGTERM');
+                let count = 0;
+                while (count < 15) {
+                    try {
+                        process.kill(opencodeProcess.pid, 0);
+                        await new Promise(r => setTimeout(r, 200));
+                        count++;
+                    } catch (e) { break; }
+                }
+                try { process.kill(opencodeProcess.pid, 'SIGKILL'); } catch (e) {}
+            } catch (e) {}
+        }
         process.exit(0);
-    });
+    };
 
-    process.on('SIGINT', () => {
-        console.log('[CLEANUP] Killing opencode process...');
-        if (opencodeProcess) opencodeProcess.kill('SIGINT');
-        process.exit(0);
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+    
+    process.on('uncaughtException', (err) => {
+        console.error('[UNCAUGHT EXCEPTION]', err);
+        shutdown();
+    });
+    
+    process.on('unhandledRejection', (reason) => {
+        console.error('[UNHANDLED REJECTION]', reason);
+        shutdown();
     });
 
     const activeSessions = new Map();
@@ -396,10 +426,20 @@ async function stopProcess() {
     if (fs.existsSync(ws.engine)) {
         try {
             const engine = JSON.parse(fs.readFileSync(ws.engine, 'utf8'));
-            process.kill(engine.pid, 'SIGTERM');
+            const pid = parseInt(engine.pid, 10);
+            process.kill(pid, 'SIGTERM');
+            let count = 0;
+            while (count < 15) {
+                try {
+                    process.kill(pid, 0);
+                    await new Promise(r => setTimeout(r, 200));
+                    count++;
+                } catch (e) { break; }
+            }
+            try { process.kill(pid, 'SIGKILL'); } catch (e) {}
             stopped = true;
         } catch (e) {}
-        fs.unlinkSync(ws.engine);
+        try { fs.unlinkSync(ws.engine); } catch (e) {}
     }
 
     if (fs.existsSync(pidFile)) {
