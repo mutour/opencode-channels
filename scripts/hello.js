@@ -1,7 +1,7 @@
 module.exports = {
     command: 'hello',
-    description: '打招呼',
+    description: 'Say hello',
     async execute(ctx) {
-        await ctx.reply('你好！我是 OpenCode Channels 网关。');
+        await ctx.reply('Hello! I am the OpenCode Channels gateway.');
     }
 };

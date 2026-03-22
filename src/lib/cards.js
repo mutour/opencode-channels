@@ -23,7 +23,7 @@ class CardManager {
                 },
                 {
                     tag: 'note',
-                    elements: [{ tag: 'plain_text', content: `状态: ${status === 'processing' ? '正在执行...' : '任务完成'}` }]
+                    elements: [{ tag: 'plain_text', content: `Status: ${status === 'processing' ? 'Processing...' : 'Task Completed'}` }]
                 }
             ]
         };
@@ -76,7 +76,7 @@ class CardManager {
                 },
                 {
                     tag: 'note',
-                    elements: [{ tag: 'plain_text', content: `状态: ${status === 'processing' ? '正在执行...' : '任务完成'}` }]
+                    elements: [{ tag: 'plain_text', content: `Status: ${status === 'processing' ? 'Processing...' : 'Task Completed'}` }]
                 }
             ]
         };
@@ -86,26 +86,26 @@ class CardManager {
         return {
             config: { wide_screen_mode: true },
             header: {
-                title: { tag: 'plain_text', content: '🔐 授权申请' },
+                title: { tag: 'plain_text', content: '🔐 Authorization Request' },
                 template: 'orange'
             },
             elements: [
                 {
                     tag: 'div',
-                    text: { tag: 'lark_md', content: `**用户 ID**: \`${userId}\` 正在申请访问权限。\n\n**申请内容**: ${content}` }
+                    text: { tag: 'lark_md', content: `**User ID**: \`${userId}\` is requesting access.\n\n**Request content**: ${content}` }
                 },
                 {
                     tag: 'action',
                     actions: [
                         {
                             tag: 'button',
-                            text: { tag: 'plain_text', content: '批准' },
+                            text: { tag: 'plain_text', content: 'Approve' },
                             type: 'primary',
                             value: { action: 'approve', userId: userId, chatId: chatId }
                         },
                         {
                             tag: 'button',
-                            text: { tag: 'plain_text', content: '拒绝' },
+                            text: { tag: 'plain_text', content: 'Deny' },
                             type: 'danger',
                             value: { action: 'deny', userId: userId, chatId: chatId }
                         }
@@ -119,7 +119,7 @@ class CardManager {
         const total = 10;
         const filled = Math.round(progress / 10);
         const bar = '█'.repeat(filled) + '░'.repeat(total - filled);
-        return `进度: [${bar}] ${progress}%`;
+        return `Progress: [${bar}] ${progress}%`;
     }
 }
 

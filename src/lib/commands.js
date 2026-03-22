@@ -72,9 +72,9 @@ class CommandRegistry {
     }
 
     getHelp() {
-        let help = '网关指令 (使用 # 开头):\n';
+        let help = 'Gateway Commands (starts with #):\n';
         for (const script of this.commands.values()) {
-            help += `#${script.command}: ${script.description || '无描述'}\n`;
+            help += `#${script.command}: ${script.description || 'No description'}\n`;
         }
         return help;
     }

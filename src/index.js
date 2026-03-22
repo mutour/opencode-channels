@@ -48,7 +48,7 @@ async function runServer() {
     const config = securityManager.getConfig();
     
     if (!config.feishu.appId || !config.feishu.appSecret) {
-        console.error(chalk.red('配置不完整，请先运行: oc-channels setup'));
+        console.error(chalk.red('Configuration incomplete, please run first: oc-channels setup'));
         process.exit(1);
     }
 
@@ -103,9 +103,17 @@ async function runServer() {
     const commandRegistry = new CommandRegistry(ws.scripts);
     await commandRegistry.init();
 
-    commandRegistry.registerBuiltIn('workspace', '切换 OpenCode 工作区目录', async (ctx, args) => {
+    commandRegistry.registerBuiltIn('help', 'Show this help message', async (ctx, args) => {
+        await ctx.replyCard(CardManager.createServiceCard('Help', commandRegistry.getHelp(), 'success'));
+    });
+
+    commandRegistry.registerBuiltIn('commands', 'List all supported commands', async (ctx, args) => {
+        await ctx.replyCard(CardManager.createServiceCard('Commands', commandRegistry.getHelp(), 'success'));
+    });
+
+    commandRegistry.registerBuiltIn('workspace', 'Switch OpenCode workspace directory', async (ctx, args) => {
         if (args.length === 0) {
-            await ctx.replyCard(CardManager.createServiceCard('⚠️ 提示', '请提供目录路径，例如: #workspace ~/projects/my-app', 'warning'));
+            await ctx.replyCard(CardManager.createServiceCard('⚠️ Notice', 'Please provide a directory path, for example: #workspace ~/projects/my-app', 'warning'));
             return;
         }
         let targetPath = args.join(' ');
@@ -115,7 +123,7 @@ async function runServer() {
         targetPath = path.resolve(targetPath);
 
         if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isDirectory()) {
-            await ctx.replyCard(CardManager.createServiceCard('❌ 错误', `目录不存在或无效: ${targetPath}`, 'error'));
+            await ctx.replyCard(CardManager.createServiceCard('❌ Error', `Directory does not exist or is invalid: ${targetPath}`, 'error'));
             return;
         }
 
@@ -123,13 +131,13 @@ async function runServer() {
         currentConfig.workspace = targetPath;
         securityManager.saveConfig(currentConfig);
 
-        await ctx.replyCard(CardManager.createServiceCard('⏳ 切换中', `正在重启 OpenCode 引擎至:\n${targetPath}`, 'processing'));
+        await ctx.replyCard(CardManager.createServiceCard('⏳ Switching', `Restarting OpenCode engine to:\n${targetPath}`, 'processing'));
 
         try {
             await startOpencodeEngine(targetPath);
-            await ctx.replyCard(CardManager.createServiceCard('✅ 切换成功', `工作区已切换至:\n${targetPath}`, 'success'));
+            await ctx.replyCard(CardManager.createServiceCard('✅ Switch Success', `Workspace switched to:\n${targetPath}`, 'success'));
         } catch (err) {
-            await ctx.replyCard(CardManager.createServiceCard('❌ 切换失败', `引擎重启失败: ${err.message}`, 'error'));
+            await ctx.replyCard(CardManager.createServiceCard('❌ Switch Failed', `Engine restart failed: ${err.message}`, 'error'));
         }
     });
 
@@ -195,8 +203,8 @@ async function runServer() {
             if (!isWhitelisted) {
                 if (!adminId) {
                     await ctx.replyCard(CardManager.createServiceCard(
-                        '⚠️ 访问受限',
-                        `系统尚未配置管理员。\n\n您的 User ID: \`${userId}\`\n\n请在服务器执行以下命令进行授权：\n\`oc-channels whitelist add ${userId} admin\``,
+                        '⚠️ Access Restricted',
+                        `System has no admin configured.\n\nYour User ID: \`${userId}\`\n\nPlease run the following command on the server to authorize:\n\`oc-channels whitelist add ${userId} admin\``,
                         'warning'
                     ));
                 } else {
@@ -204,14 +212,14 @@ async function runServer() {
                     if (adminChatId) {
                         await ctx.replyCard(CardManager.createAuthRequestCard(userId, chatId, contentText), adminChatId);
                         await ctx.replyCard(CardManager.createServiceCard(
-                            '⏳ 申请已发送',
-                            '您的访问申请已发送给管理员，请耐心等待。',
+                            '⏳ Request Sent',
+                            'Your access request has been sent to the admin, please wait patiently.',
                             'processing'
                         ));
                     } else {
                         await ctx.replyCard(CardManager.createServiceCard(
-                            '⚠️ 访问受限',
-                            `您的账号尚未获得授权。\n\n管理员尚未激活（未发送过消息）。\n请联系管理员执行：\n\`oc-channels whitelist add ${userId}\``,
+                            '⚠️ Access Restricted',
+                            `Your account is not authorized.\n\nAdmin has not been activated yet (never sent a message).\nPlease ask the admin to run:\n\`oc-channels whitelist add ${userId}\``,
                             'warning'
                         ));
                     }
@@ -224,17 +232,15 @@ async function runServer() {
 
             if (contentText.startsWith('#')) {
                 const handled = await commandRegistry.handle(ctx);
-                if (!handled && contentText === '#help') {
-                    await ctx.replyCard(CardManager.createServiceCard('帮助', commandRegistry.getHelp(), 'processing'));
-                } else if (!handled) {
-                    await ctx.replyCard(CardManager.createServiceCard('错误', '未知指令', 'failed'));
+                if (!handled) {
+                    await ctx.replyCard(CardManager.createServiceCard('Error', 'Unknown command', 'failed'));
                 }
                 return;
             }
 
             try {
                 const sessionId = await bridge.createSession();
-                const initialCard = CardManager.createOpenCodeCard('任务', '🚀 任务已下达...', 'processing');
+                const initialCard = CardManager.createOpenCodeCard('Task', '🚀 Task submitted...', 'processing');
                 const cardResp = await ctx.replyCard(initialCard);
                 const messageId = cardResp.data.message_id;
 
@@ -250,11 +256,11 @@ async function runServer() {
                 await bridge.sendPrompt(sessionId, contentText);
             } catch (err) {
                 console.error('[OPCODE ERROR]', err.message);
-                let errorMsg = '连接 OpenCode 失败，请确认服务已启动。';
+                let errorMsg = 'Failed to connect to OpenCode, please ensure the service is running.';
                 if (err.code === 'ECONNREFUSED' || err.message.includes('ECONNREFUSED')) {
-                    errorMsg = '❌ OpenCode 服务未启动 (ECONNREFUSED)。请在服务器运行 `opencode` 后重试。';
+                    errorMsg = '❌ OpenCode service is not running (ECONNREFUSED). Please run `opencode` on the server and try again.';
                 }
-                await ctx.replyCard(CardManager.createServiceCard('❌ 服务故障', errorMsg, 'failed'));
+                await ctx.replyCard(CardManager.createServiceCard('❌ Service Failure', errorMsg, 'failed'));
             }
         },
         'card.action.trigger': async (data) => {
@@ -264,7 +270,7 @@ async function runServer() {
             
             if (adminId !== securityManager.getAdmin()) {
                 return {
-                    toast: { type: 'error', content: '只有管理员可以操作' }
+                    toast: { type: 'error', content: 'Only admins can perform this action' }
                 };
             }
 
@@ -280,26 +286,26 @@ async function runServer() {
                         params: { receive_id_type: 'chat_id' },
                         data: {
                             receive_id: targetChatId,
-                            content: JSON.stringify(CardManager.createServiceCard('🎉 授权成功', '管理员已批准您的访问申请，现在可以开始使用了。', 'success')),
+                            content: JSON.stringify(CardManager.createServiceCard('🎉 Authorization Success', 'Admin has approved your access request, you can now start using it.', 'success')),
                             msg_type: 'interactive',
                         },
                     });
                 }
                 
-                return CardManager.createServiceCard('✅ 授权成功', `已批准用户 \`${targetUserId}\` 的访问申请。`, 'success');
+                return CardManager.createServiceCard('✅ Authorization Success', `Approved access request for user \`${targetUserId}\`.`, 'success');
             } else if (actionType === 'deny') {
                 if (targetChatId) {
                     await larkClient.im.message.create({
                         params: { receive_id_type: 'chat_id' },
                         data: {
                             receive_id: targetChatId,
-                            content: JSON.stringify(CardManager.createServiceCard('🚫 授权已拒绝', '管理员拒绝了您的访问申请。', 'failed')),
+                            content: JSON.stringify(CardManager.createServiceCard('🚫 Authorization Denied', 'Admin has denied your access request.', 'failed')),
                             msg_type: 'interactive',
                         },
                     });
                 }
 
-                return CardManager.createServiceCard('🚫 授权已拒绝', `已拒绝用户 \`${targetUserId}\` 的访问申请。`, 'failed');
+                return CardManager.createServiceCard('🚫 Authorization Denied', `Denied access request for user \`${targetUserId}\`.`, 'failed');
             }
         }
     });
@@ -311,7 +317,7 @@ async function runServer() {
             larkClient.im.message.patch({
                 path: { message_id: meta.message_id },
                 data: {
-                    content: JSON.stringify(CardManager.createOpenCodeCard('执行中', meta.content || '...', 'processing'))
+                    content: JSON.stringify(CardManager.createOpenCodeCard('Processing', meta.content || '...', 'processing'))
                 }
             }).catch(err => console.error(`[SSE PATCH ERROR]`, err.message));
             meta.lastUpdate = now;
@@ -355,7 +361,7 @@ async function runServer() {
             larkClient.im.message.patch({
                 path: { message_id: meta.message_id },
                 data: {
-                    content: JSON.stringify(CardManager.createOpenCodeCard('✅ 任务完成', meta.content || '任务结束', 'success'))
+                    content: JSON.stringify(CardManager.createOpenCodeCard('✅ Task Completed', meta.content || 'Task finished', 'success'))
                 }
             }).catch(err => console.error(`[SSE FINAL ERROR]`, err.message));
             
@@ -373,7 +379,7 @@ async function runServer() {
                 larkClient.im.message.patch({
                     path: { message_id: meta.message_id },
                     data: {
-                        content: JSON.stringify(CardManager.createOpenCodeCard('⚠️ 连接中断', 'OpenCode 服务已断开，正在尝试重连...', 'warning'))
+                        content: JSON.stringify(CardManager.createOpenCodeCard('⚠️ Connection Lost', 'OpenCode service disconnected, attempting to reconnect...', 'warning'))
                     }
                 }).catch(() => {});
             }
@@ -421,15 +427,15 @@ async function stopProcess() {
 
 program
     .command('start')
-    .description('启动服务')
-    .option('-d, --daemon', '后台运行')
+    .description('Start service')
+    .option('-d, --daemon', 'Run in background')
     .action(async (options) => {
         if (options.daemon) {
             if (fs.existsSync(pidFile)) {
                 const pid = fs.readFileSync(pidFile, 'utf8');
                 try {
                     process.kill(parseInt(pid), 0);
-                    console.log(chalk.yellow(`服务已运行 (PID: ${pid})`));
+                    console.log(chalk.yellow(`Service already running (PID: ${pid})`));
                     return;
                 } catch (e) {
                     fs.unlinkSync(pidFile);
@@ -443,7 +449,7 @@ program
             });
             fs.writeFileSync(pidFile, child.pid.toString());
             child.unref();
-            console.log(chalk.green(`✔ 已后台启动 (PID: ${child.pid})`));
+            console.log(chalk.green(`✔ Started in background (PID: ${child.pid})`));
         } else {
             console.log(boxen(chalk.green('OpenCode Channels'), { padding: 1, borderStyle: 'double' }));
             await runServer();
@@ -452,16 +458,16 @@ program
 
 program
     .command('stop')
-    .description('停止服务')
+    .description('Stop service')
     .action(async () => {
-        const spinner = ora('停止中...').start();
-        if (await stopProcess()) spinner.succeed('已停止');
-        else spinner.fail('未运行');
+        const spinner = ora('Stopping...').start();
+        if (await stopProcess()) spinner.succeed('Stopped');
+        else spinner.fail('Not running');
     });
 
 program
     .command('restart')
-    .description('重启服务')
+    .description('Restart service')
     .action(async () => {
         await stopProcess();
         const child = spawn(process.argv[0], [process.argv[1], 'start', '--daemon'], {
@@ -470,48 +476,48 @@ program
         });
         fs.writeFileSync(pidFile, child.pid.toString());
         child.unref();
-        console.log(chalk.green(`✔ 已重启`));
+        console.log(chalk.green(`✔ Restarted`));
     });
 
 program
     .command('status')
-    .description('查看服务运行状态')
+    .description('Check service status')
     .action(() => {
         if (fs.existsSync(pidFile)) {
             const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
             try {
                 process.kill(pid, 0);
-                console.log(chalk.green(`✔ 网关正在运行 (PID: ${pid})`));
+                console.log(chalk.green(`✔ Gateway is running (PID: ${pid})`));
             } catch (e) {
-                console.log(chalk.yellow(`网关未运行 (但发现残留的 PID 文件: ${pid})`));
+                console.log(chalk.yellow(`Gateway not running (but stale PID file found: ${pid})`));
             }
         } else {
-            console.log(chalk.gray('网关未运行'));
+            console.log(chalk.gray('Gateway not running'));
         }
 
         if (fs.existsSync(ws.engine)) {
             try {
                 const engine = JSON.parse(fs.readFileSync(ws.engine, 'utf8'));
                 process.kill(engine.pid, 0);
-                console.log(chalk.green(`✔ OpenCode 正在运行 (PID: ${engine.pid}, Port: ${engine.port})`));
+                console.log(chalk.green(`✔ OpenCode is running (PID: ${engine.pid}, Port: ${engine.port})`));
             } catch (e) {
-                console.log(chalk.yellow(`OpenCode 未运行 (但发现残留的 engine 文件)`));
+                console.log(chalk.yellow(`OpenCode not running (but stale engine file found)`));
             }
         } else {
-            console.log(chalk.gray('OpenCode 未运行'));
+            console.log(chalk.gray('OpenCode not running'));
         }
     });
 
 program
     .command('setup')
-    .description('初始化配置')
+    .description('Initialize configuration')
     .action(async () => {
         const security = new SecurityManager(ws.config, ws.storage);
         const configData = security.getConfig();
         const answers = await inquirer.prompt([
-            { name: 'appId', message: '飞书 App ID:', default: configData.feishu.appId },
-            { name: 'appSecret', message: '飞书 App Secret:', default: configData.feishu.appSecret },
-            { name: 'proxy', message: 'HTTP 代理 (可选):', default: configData.proxy }
+            { name: 'appId', message: 'Feishu App ID:', default: configData.feishu.appId },
+            { name: 'appSecret', message: 'Feishu App Secret:', default: configData.feishu.appSecret },
+            { name: 'proxy', message: 'HTTP Proxy (Optional):', default: configData.proxy }
         ]);
         configData.feishu.appId = answers.appId;
         configData.feishu.appSecret = answers.appSecret;
@@ -519,15 +525,15 @@ program
         security.saveConfig(configData);
 
         console.log(chalk.cyan('\n' + '━'.repeat(40)));
-        console.log(chalk.bold('⚠️ 提醒:'));
-        console.log('1. 事件订阅选 WebSocket');
-        console.log('2. 添加事件: im.message.receive_v1');
-        console.log('3. 权限: im:message, im:message:send_as_bot');
-        console.log('4. 必须发布新版本！');
+        console.log(chalk.bold('⚠️ Notice:'));
+        console.log('1. Choose WebSocket for event subscription');
+        console.log('2. Add event: im.message.receive_v1');
+        console.log('3. Permissions: im:message, im:message:send_as_bot');
+        console.log('4. You must publish a new version!');
         console.log(chalk.cyan('━'.repeat(40) + '\n'));
 
         const { startNow } = await inquirer.prompt([
-            { type: 'confirm', name: 'startNow', message: '是否立即启动？', default: true }
+            { type: 'confirm', name: 'startNow', message: 'Start immediately?', default: true }
         ]);
 
         if (startNow) {
@@ -538,13 +544,13 @@ program
             });
             fs.writeFileSync(pidFile, child.pid.toString());
             child.unref();
-            console.log(chalk.green(`✔ 已后台启动 (PID: ${child.pid})`));
+            console.log(chalk.green(`✔ Started in background (PID: ${child.pid})`));
         }
     });
 
 program
     .command('whitelist')
-    .description('管理授权')
+    .description('Manage authorization')
     .argument('[action]', 'add|list|remove', 'list')
     .argument('[id]', 'User ID')
     .argument('[role]', 'admin|user', 'user')
@@ -552,7 +558,7 @@ program
         const security = new SecurityManager(ws.config, ws.storage);
         const configData = security.getConfig();
         if (action === 'list') {
-            console.log(chalk.bold('\n授权列表:'));
+            console.log(chalk.bold('\nAuthorization List:'));
             if (configData.admin) console.log(chalk.blue(`[ADMIN] ${configData.admin}`));
             if (configData.whitelist) configData.whitelist.forEach(uid => {
                 if (uid !== configData.admin) console.log(` - ${uid}`);
@@ -561,7 +567,7 @@ program
             if (fs.existsSync(logPath)) {
                 const unauthorized = fs.readFileSync(logPath, 'utf8').trim();
                 if (unauthorized) {
-                    console.log(chalk.red('\n未授权记录:'));
+                    console.log(chalk.red('\nUnauthorized access records:'));
                     console.log(unauthorized);
                 }
             }
@@ -569,14 +575,14 @@ program
             let success = false;
             if (role === 'admin') {
                 security.setAdmin(id);
-                console.log(chalk.green(`已设置 ${id} 为管理员`));
+                console.log(chalk.green(`Set ${id} as admin`));
                 success = true;
             } else {
                 if (security.addToWhitelist(id)) {
-                    console.log(chalk.green(`已授权 ${id}`));
+                    console.log(chalk.green(`Authorized ${id}`));
                     success = true;
                 } else {
-                    console.log(chalk.yellow(`${id} 已在授权列表中`));
+                    console.log(chalk.yellow(`${id} is already in the whitelist`));
                     success = true;
                 }
             }
@@ -585,20 +591,20 @@ program
                 try {
                     const larkClient = createLarkClient(configData);
                     const message = role === 'admin' 
-                        ? '您已被授权为管理员，现在可以开始使用了。' 
-                        : '您已被授权访问，现在可以开始使用了。';
+                        ? 'You have been authorized as an admin, you can start using the service now.' 
+                        : 'You have been authorized, you can start using the service now.';
                     
                     await larkClient.im.message.create({
                         params: { receive_id_type: 'user_id' },
                         data: {
                             receive_id: id,
-                            content: JSON.stringify(CardManager.createServiceCard('🎉 授权成功', message, 'success')),
+                            content: JSON.stringify(CardManager.createServiceCard('🎉 Authorization Success', message, 'success')),
                             msg_type: 'interactive',
                         },
                     });
-                    console.log(chalk.cyan(`已向用户 ${id} 发送飞书通知`));
+                    console.log(chalk.cyan(`Sent Feishu notification to user ${id}`));
                 } catch (err) {
-                    console.error(chalk.red(`[FEISHU ERROR] 无法发送通知: ${err.message}`));
+                    console.error(chalk.red(`[FEISHU ERROR] Failed to send notification: ${err.message}`));
                 }
             }
         } else if (action === 'remove' && id) {
@@ -607,7 +613,7 @@ program
                 config.whitelist = config.whitelist.filter(uid => uid !== id);
                 if (config.admin === id) config.admin = null;
                 security.saveConfig(config);
-                console.log(chalk.green(`已移除 ${id} 的授权`));
+                console.log(chalk.green(`Removed authorization for ${id}`));
             }
         }
         process.exit(0);
