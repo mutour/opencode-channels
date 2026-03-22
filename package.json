@@ -1,6 +1,7 @@
 {
   "name": "opencode-channels",
-  "version": "1.0.0",
+  "version": "1.1.4",
+  "description": "Gateway application bridging Feishu/Lark with the OpenCode engine.",
   "main": "src/index.js",
   "bin": {
     "oc-channels": "src/index.js"
@@ -16,10 +17,16 @@
     "whitelist": "node src/index.js whitelist",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "opencode",
+    "feishu",
+    "lark",
+    "bot",
+    "ai",
+    "gateway"
+  ],
+  "author": "OpenCode",
+  "license": "MIT",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "axios": "^1.13.6",

@@ -1,0 +1,11 @@
+{
+  "feishu": {
+    "appId": "cli_your_feishu_app_id_here",
+    "appSecret": "your_feishu_app_secret_here"
+  },
+  "proxy": "",
+  "workspace": "",
+  "whitelist": [],
+  "admin": null,
+  "adminChatId": null
+}
