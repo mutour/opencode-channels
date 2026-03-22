@@ -220,6 +220,21 @@ async function runServer() {
                         console.error('[FEISHU ERROR] replyCard failed:', err.message);
                         throw err;
                     }
+                },
+                async reply(text, targetChatId = chatId) {
+                    try {
+                        return await larkClient.im.message.create({
+                            params: { receive_id_type: 'chat_id' },
+                            data: {
+                                receive_id: targetChatId,
+                                content: JSON.stringify({ text: text }),
+                                msg_type: 'text',
+                            },
+                        });
+                    } catch (err) {
+                        console.error('[FEISHU ERROR] reply text failed:', err.message);
+                        throw err;
+                    }
                 }
             };
 
