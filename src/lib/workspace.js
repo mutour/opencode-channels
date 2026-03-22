@@ -25,8 +25,7 @@ function getWorkspace() {
             feishu: { appId: "", appSecret: "", domain: "https://open.feishu.cn" },
             proxy: "",
             whitelist: [],
-            admin: "",
-            opencode: { port: 4096, host: "127.0.0.1" }
+            admin: ""
         };
         fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
     }
@@ -34,6 +33,7 @@ function getWorkspace() {
     return {
         root: workspace,
         config: configPath,
+        engine: path.join(workspace, 'engine.json'),
         scripts: path.join(workspace, 'scripts'),
         storage: path.join(workspace, 'storage'),
         logs: path.join(workspace, 'logs')

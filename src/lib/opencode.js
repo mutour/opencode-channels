@@ -2,7 +2,8 @@ const axios = require('axios');
 const EventSource = require('eventsource').EventSource || require('eventsource');
 
 class OpenCodeBridge {
-    constructor(host = '127.0.0.1', port = 4096) {
+    constructor(host = '127.0.0.1', port) {
+        if (!port) throw new Error('OpenCode port is required');
         this.baseUrl = `http://${host}:${port}`;
     }
 

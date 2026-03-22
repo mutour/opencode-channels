@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 const { spawn } = require('child_process');
 const { Command } = require('commander');
 const chalk = require('chalk');
@@ -30,6 +31,17 @@ program
     .description('OpenCode Channels Gateway')
     .version('1.1.4');
 
+async function findFreePort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.listen(0, '127.0.0.1', () => {
+            const { port } = server.address();
+            server.close(() => resolve(port));
+        });
+        server.on('error', reject);
+    });
+}
+
 async function runServer() {
     const config = JSON.parse(fs.readFileSync(ws.config, 'utf8'));
     
@@ -38,13 +50,53 @@ async function runServer() {
         process.exit(1);
     }
 
+    const opencodePort = await findFreePort();
+    console.log(chalk.cyan(`[OPCODE] Starting opencode on port ${opencodePort}...`));
+
+    const opencodeProcess = spawn('opencode', ['serve', '--port', opencodePort.toString(), '--hostname', '127.0.0.1', '--print-logs'], {
+        stdio: 'pipe'
+    });
+
+    fs.writeFileSync(ws.engine, JSON.stringify({
+        pid: opencodeProcess.pid,
+        port: opencodePort,
+        startedAt: new Date().toISOString()
+    }, null, 2));
+
+    opencodeProcess.stdout.on('data', (data) => {
+        console.log(`[OPCODE STDOUT] ${data}`);
+    });
+
+    opencodeProcess.stderr.on('data', (data) => {
+        console.error(`[OPCODE STDERR] ${data}`);
+    });
+
+    opencodeProcess.on('exit', (code) => {
+        console.log(chalk.yellow(`[OPCODE] Process exited with code ${code}`));
+        if (fs.existsSync(ws.engine)) fs.unlinkSync(ws.engine);
+    });
+
+    await new Promise(r => setTimeout(r, 2000));
+
     const commandRegistry = new CommandRegistry(ws.scripts);
     await commandRegistry.init();
 
     const larkClient = createLarkClient(config);
     const securityManager = new SecurityManager(ws.config, ws.storage);
     const storageManager = new StorageManager(path.join(ws.storage, 'history'));
-    const bridge = new OpenCodeBridge(config.opencode.host, config.opencode.port);
+    const bridge = new OpenCodeBridge('127.0.0.1', opencodePort);
+
+    process.on('SIGTERM', () => {
+        console.log('[CLEANUP] Killing opencode process...');
+        opencodeProcess.kill('SIGTERM');
+        process.exit(0);
+    });
+
+    process.on('SIGINT', () => {
+        console.log('[CLEANUP] Killing opencode process...');
+        opencodeProcess.kill('SIGINT');
+        process.exit(0);
+    });
 
     const activeSessions = new Map();
 
@@ -276,6 +328,17 @@ async function runServer() {
 }
 
 async function stopProcess() {
+    let stopped = false;
+    
+    if (fs.existsSync(ws.engine)) {
+        try {
+            const engine = JSON.parse(fs.readFileSync(ws.engine, 'utf8'));
+            process.kill(engine.pid, 'SIGTERM');
+            stopped = true;
+        } catch (e) {}
+        fs.unlinkSync(ws.engine);
+    }
+
     if (fs.existsSync(pidFile)) {
         const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
         try {
@@ -291,13 +354,12 @@ async function stopProcess() {
                 }
             }
             if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
-            return true;
+            stopped = true;
         } catch (e) {
             if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
-            return false;
         }
     }
-    return false;
+    return stopped;
 }
 
 program
@@ -362,12 +424,24 @@ program
             const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
             try {
                 process.kill(pid, 0);
-                console.log(chalk.green(`✔ 服务正在运行 (PID: ${pid})`));
+                console.log(chalk.green(`✔ 网关正在运行 (PID: ${pid})`));
             } catch (e) {
-                console.log(chalk.yellow(`服务未运行 (但发现残留的 PID 文件: ${pid})`));
+                console.log(chalk.yellow(`网关未运行 (但发现残留的 PID 文件: ${pid})`));
             }
         } else {
-            console.log(chalk.gray('服务未运行'));
+            console.log(chalk.gray('网关未运行'));
+        }
+
+        if (fs.existsSync(ws.engine)) {
+            try {
+                const engine = JSON.parse(fs.readFileSync(ws.engine, 'utf8'));
+                process.kill(engine.pid, 0);
+                console.log(chalk.green(`✔ OpenCode 正在运行 (PID: ${engine.pid}, Port: ${engine.port})`));
+            } catch (e) {
+                console.log(chalk.yellow(`OpenCode 未运行 (但发现残留的 engine 文件)`));
+            }
+        } else {
+            console.log(chalk.gray('OpenCode 未运行'));
         }
     });
 
