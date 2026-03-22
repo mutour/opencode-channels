@@ -17,6 +17,10 @@ class CommandRegistry {
         this.startWatcher();
     }
 
+    registerBuiltIn(command, description, execute) {
+        this.commands.set(command, { command, description, execute });
+    }
+
     async loadAll() {
         const files = fs.readdirSync(this.scriptsDir);
         for (const file of files) {

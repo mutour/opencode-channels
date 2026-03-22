@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const net = require('net');
 const { spawn } = require('child_process');
 const { Command } = require('commander');
@@ -43,7 +44,8 @@ async function findFreePort() {
 }
 
 async function runServer() {
-    const config = JSON.parse(fs.readFileSync(ws.config, 'utf8'));
+    const securityManager = new SecurityManager(ws.config, ws.storage);
+    const config = securityManager.getConfig();
     
     if (!config.feishu.appId || !config.feishu.appSecret) {
         console.error(chalk.red('配置不完整，请先运行: oc-channels setup'));
@@ -51,50 +53,99 @@ async function runServer() {
     }
 
     const opencodePort = await findFreePort();
-    console.log(chalk.cyan(`[OPCODE] Starting opencode on port ${opencodePort}...`));
+    let opencodeProcess = null;
 
-    const opencodeProcess = spawn('opencode', ['serve', '--port', opencodePort.toString(), '--hostname', '127.0.0.1', '--print-logs'], {
-        stdio: 'pipe'
-    });
+    async function startOpencodeEngine(cwd) {
+        if (opencodeProcess) {
+            console.log(chalk.yellow(`[OPCODE] Stopping existing opencode process (PID: ${opencodeProcess.pid})...`));
+            opencodeProcess.kill('SIGTERM');
+            await new Promise(r => setTimeout(r, 1000));
+        }
 
-    fs.writeFileSync(ws.engine, JSON.stringify({
-        pid: opencodeProcess.pid,
-        port: opencodePort,
-        startedAt: new Date().toISOString()
-    }, null, 2));
+        console.log(chalk.cyan(`[OPCODE] Starting opencode on port ${opencodePort} in ${cwd}...`));
+        opencodeProcess = spawn('opencode', ['serve', '--port', opencodePort.toString(), '--hostname', '127.0.0.1', '--print-logs'], {
+            cwd,
+            stdio: 'pipe'
+        });
 
-    opencodeProcess.stdout.on('data', (data) => {
-        console.log(`[OPCODE STDOUT] ${data}`);
-    });
+        fs.writeFileSync(ws.engine, JSON.stringify({
+            pid: opencodeProcess.pid,
+            port: opencodePort,
+            startedAt: new Date().toISOString(),
+            workspace: cwd
+        }, null, 2));
 
-    opencodeProcess.stderr.on('data', (data) => {
-        console.error(`[OPCODE STDERR] ${data}`);
-    });
+        opencodeProcess.stdout.on('data', (data) => {
+            console.log(`[OPCODE STDOUT] ${data}`);
+        });
 
-    opencodeProcess.on('exit', (code) => {
-        console.log(chalk.yellow(`[OPCODE] Process exited with code ${code}`));
-        if (fs.existsSync(ws.engine)) fs.unlinkSync(ws.engine);
-    });
+        opencodeProcess.stderr.on('data', (data) => {
+            console.error(`[OPCODE STDERR] ${data}`);
+        });
 
-    await new Promise(r => setTimeout(r, 2000));
+        opencodeProcess.on('exit', (code) => {
+            console.log(chalk.yellow(`[OPCODE] Process exited with code ${code}`));
+            try {
+                if (fs.existsSync(ws.engine)) {
+                    const engineInfo = JSON.parse(fs.readFileSync(ws.engine, 'utf8'));
+                    if (engineInfo.pid === opencodeProcess.pid) {
+                        fs.unlinkSync(ws.engine);
+                    }
+                }
+            } catch (e) {}
+        });
+
+        await new Promise(r => setTimeout(r, 2000));
+    }
+
+    await startOpencodeEngine(config.workspace || process.cwd());
 
     const commandRegistry = new CommandRegistry(ws.scripts);
     await commandRegistry.init();
 
+    commandRegistry.registerBuiltIn('workspace', '切换 OpenCode 工作区目录', async (ctx, args) => {
+        if (args.length === 0) {
+            await ctx.replyCard(CardManager.createServiceCard('⚠️ 提示', '请提供目录路径，例如: #workspace ~/projects/my-app', 'warning'));
+            return;
+        }
+        let targetPath = args.join(' ');
+        if (targetPath.startsWith('~')) {
+            targetPath = path.join(os.homedir(), targetPath.slice(1));
+        }
+        targetPath = path.resolve(targetPath);
+
+        if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isDirectory()) {
+            await ctx.replyCard(CardManager.createServiceCard('❌ 错误', `目录不存在或无效: ${targetPath}`, 'error'));
+            return;
+        }
+
+        const currentConfig = securityManager.getConfig();
+        currentConfig.workspace = targetPath;
+        securityManager.saveConfig(currentConfig);
+
+        await ctx.replyCard(CardManager.createServiceCard('⏳ 切换中', `正在重启 OpenCode 引擎至:\n${targetPath}`, 'processing'));
+
+        try {
+            await startOpencodeEngine(targetPath);
+            await ctx.replyCard(CardManager.createServiceCard('✅ 切换成功', `工作区已切换至:\n${targetPath}`, 'success'));
+        } catch (err) {
+            await ctx.replyCard(CardManager.createServiceCard('❌ 切换失败', `引擎重启失败: ${err.message}`, 'error'));
+        }
+    });
+
     const larkClient = createLarkClient(config);
-    const securityManager = new SecurityManager(ws.config, ws.storage);
     const storageManager = new StorageManager(path.join(ws.storage, 'history'));
     const bridge = new OpenCodeBridge('127.0.0.1', opencodePort);
 
     process.on('SIGTERM', () => {
         console.log('[CLEANUP] Killing opencode process...');
-        opencodeProcess.kill('SIGTERM');
+        if (opencodeProcess) opencodeProcess.kill('SIGTERM');
         process.exit(0);
     });
 
     process.on('SIGINT', () => {
         console.log('[CLEANUP] Killing opencode process...');
-        opencodeProcess.kill('SIGINT');
+        if (opencodeProcess) opencodeProcess.kill('SIGINT');
         process.exit(0);
     });
 
