@@ -1,0 +1,35 @@
+{
+  "name": "opencode-channels",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "bin": {
+    "oc-channels": "src/index.js"
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "setup": "node src/index.js setup",
+    "start": "node src/index.js start",
+    "dev": "node src/index.js start",
+    "whitelist": "node src/index.js whitelist",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
+    "axios": "^1.13.6",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "chokidar": "^3.5.3",
+    "commander": "^14.0.3",
+    "dotenv": "^17.3.1",
+    "eventsource": "^4.1.0",
+    "https-proxy-agent": "^7.0.6",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
+  }
+}

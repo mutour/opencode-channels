@@ -1,0 +1,422 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const { Command } = require('commander');
+const chalk = require('chalk');
+const ora = require('ora');
+const boxen = require('boxen');
+const inquirer = require('inquirer');
+const lark = require('@larksuiteoapi/node-sdk');
+
+const { getWorkspace } = require('./lib/workspace');
+const { createLarkClient, startWS } = require('./lib/feishu');
+const CommandRegistry = require('./lib/commands');
+const SecurityManager = require('./lib/security');
+const OpenCodeBridge = require('./lib/opencode');
+const CardManager = require('./lib/cards');
+const StorageManager = require('./lib/storage');
+
+const ws = getWorkspace();
+const pidFile = path.join(ws.root, 'oc-channels.pid');
+const logFile = path.join(ws.logs, 'out.log');
+const errorLogFile = path.join(ws.logs, 'error.log');
+
+const program = new Command();
+
+program
+    .name('oc-channels')
+    .description('OpenCode Channels Gateway')
+    .version('1.1.4');
+
+async function runServer() {
+    const config = JSON.parse(fs.readFileSync(ws.config, 'utf8'));
+    
+    if (!config.feishu.appId || !config.feishu.appSecret) {
+        console.error(chalk.red('配置不完整，请先运行: oc-channels setup'));
+        process.exit(1);
+    }
+
+    const commandRegistry = new CommandRegistry(ws.scripts);
+    await commandRegistry.init();
+
+    const larkClient = createLarkClient(config);
+    const securityManager = new SecurityManager(ws.config, ws.storage);
+    const storageManager = new StorageManager(path.join(ws.storage, 'history'));
+    const bridge = new OpenCodeBridge(config.opencode.host, config.opencode.port);
+
+    const activeSessions = new Map();
+
+    const dispatcher = new lark.EventDispatcher({}).register({
+        'im.message.receive_v1': async (data) => {
+            const { message, sender } = data;
+            let contentText = '';
+            try {
+                contentText = JSON.parse(message.content).text;
+            } catch (e) {
+                contentText = message.content;
+            }
+            const userId = sender.sender_id.user_id;
+            const chatId = message.chat_id;
+
+            console.log(`[EVENT] Received message from ${userId}: ${contentText}`);
+
+            const ctx = {
+                message: { ...message, content: contentText },
+                sender,
+                async replyCard(card, targetChatId = chatId) {
+                    try {
+                        return await larkClient.im.message.create({
+                            params: { receive_id_type: 'chat_id' },
+                            data: {
+                                receive_id: targetChatId,
+                                content: JSON.stringify(card),
+                                msg_type: 'interactive',
+                            },
+                        });
+                    } catch (err) {
+                        console.error('[FEISHU ERROR] replyCard failed:', err.message);
+                        throw err;
+                    }
+                }
+            };
+
+            const isWhitelisted = securityManager.isWhitelisted(userId);
+            const adminId = securityManager.getAdmin();
+
+            if (userId === adminId) {
+                securityManager.setAdminChatId(chatId);
+            }
+
+            if (!isWhitelisted) {
+                if (!adminId) {
+                    await ctx.replyCard(CardManager.createServiceCard(
+                        '⚠️ 访问受限',
+                        `系统尚未配置管理员。\n\n您的 User ID: \`${userId}\`\n\n请在服务器执行以下命令进行授权：\n\`oc-channels whitelist add ${userId} admin\``,
+                        'warning'
+                    ));
+                } else {
+                    const adminChatId = securityManager.getAdminChatId();
+                    if (adminChatId) {
+                        await ctx.replyCard(CardManager.createAuthRequestCard(userId, chatId, contentText), adminChatId);
+                        await ctx.replyCard(CardManager.createServiceCard(
+                            '⏳ 申请已发送',
+                            '您的访问申请已发送给管理员，请耐心等待。',
+                            'processing'
+                        ));
+                    } else {
+                        await ctx.replyCard(CardManager.createServiceCard(
+                            '⚠️ 访问受限',
+                            `您的账号尚未获得授权。\n\n管理员尚未激活（未发送过消息）。\n请联系管理员执行：\n\`oc-channels whitelist add ${userId}\``,
+                            'warning'
+                        ));
+                    }
+                    securityManager.logUnauthorized(userId, contentText);
+                }
+                return;
+            }
+
+            storageManager.logMessage(chatId, userId, 'user', contentText).catch(err => console.error('[STORAGE ERROR]', err.message));
+
+            if (contentText.startsWith('#')) {
+                const handled = await commandRegistry.handle(ctx);
+                if (!handled && contentText === '#help') {
+                    await ctx.replyCard(CardManager.createServiceCard('帮助', commandRegistry.getHelp(), 'processing'));
+                } else if (!handled) {
+                    await ctx.replyCard(CardManager.createServiceCard('错误', '未知指令', 'failed'));
+                }
+                return;
+            }
+
+            try {
+                const sessionId = await bridge.createSession();
+                const initialCard = CardManager.createOpenCodeCard('任务', '🚀 任务已下达...', 'processing');
+                const cardResp = await ctx.replyCard(initialCard);
+                const messageId = cardResp.data.message_id;
+
+                activeSessions.set(sessionId, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    content: '',
+                    lastUpdate: 0
+                });
+
+                console.log(`[SESSION] Bound ${sessionId} to message ${messageId}`);
+                await bridge.sendPrompt(sessionId, contentText);
+            } catch (err) {
+                console.error('[OPCODE ERROR]', err.message);
+                await ctx.replyCard(CardManager.createServiceCard('❌ 服务故障', '连接 OpenCode 失败，请确认服务已启动。', 'failed'));
+            }
+        },
+        'card.action.trigger': async (data) => {
+            const { action, operator } = data;
+            const { value } = action;
+            const adminId = operator.user_id;
+            
+            if (adminId !== securityManager.getAdmin()) {
+                return {
+                    toast: { type: 'error', content: '只有管理员可以操作' }
+                };
+            }
+
+            const targetUserId = value.userId;
+            const targetChatId = value.chatId;
+            const actionType = value.action;
+
+            if (actionType === 'approve') {
+                securityManager.addToWhitelist(targetUserId);
+                
+                if (targetChatId) {
+                    await larkClient.im.message.create({
+                        params: { receive_id_type: 'chat_id' },
+                        data: {
+                            receive_id: targetChatId,
+                            content: JSON.stringify(CardManager.createServiceCard('🎉 授权成功', '管理员已批准您的访问申请，现在可以开始使用了。', 'success')),
+                            msg_type: 'interactive',
+                        },
+                    });
+                }
+                
+                return CardManager.createServiceCard('✅ 授权成功', `已批准用户 \`${targetUserId}\` 的访问申请。`, 'success');
+            } else if (actionType === 'deny') {
+                if (targetChatId) {
+                    await larkClient.im.message.create({
+                        params: { receive_id_type: 'chat_id' },
+                        data: {
+                            receive_id: targetChatId,
+                            content: JSON.stringify(CardManager.createServiceCard('🚫 授权已拒绝', '管理员拒绝了您的访问申请。', 'failed')),
+                            msg_type: 'interactive',
+                        },
+                    });
+                }
+
+                return CardManager.createServiceCard('🚫 授权已拒绝', `已拒绝用户 \`${targetUserId}\` 的访问申请。`, 'failed');
+            }
+        }
+    });
+
+    const updateCard = (sid, meta) => {
+        const now = Date.now();
+        if (now - meta.lastUpdate > 3000) {
+            console.log(`[SSE] Updating card for session ${sid}`);
+            larkClient.im.message.patch({
+                path: { message_id: meta.message_id },
+                data: {
+                    content: JSON.stringify(CardManager.createOpenCodeCard('执行中', meta.content || '...', 'processing'))
+                }
+            }).catch(err => console.error(`[SSE PATCH ERROR]`, err.message));
+            meta.lastUpdate = now;
+        }
+    };
+
+    bridge.listen((event) => {
+        if (!event || typeof event !== 'object') return;
+        const sid = event.sessionID || event.sessionId || event.session_id || 
+            event.properties?.sessionID || event.properties?.sessionId || event.properties?.session_id ||
+            event.properties?.part?.sessionID || event.properties?.part?.sessionId || event.properties?.part?.session_id ||
+            event.properties?.info?.sessionID || event.properties?.info?.sessionId || event.properties?.info?.session_id ||
+            event.properties?.info?.id ||
+            event.part?.sessionID || event.part?.sessionId || event.part?.session_id;
+        if (!sid || !activeSessions.has(sid)) return;
+
+        const meta = activeSessions.get(sid);
+
+        if (event.type === 'message.part.delta') {
+            const delta = event.delta || event.properties?.delta || '';
+            meta.content += delta;
+            updateCard(sid, meta);
+        } else if (event.type === 'message.part.updated') {
+            const text = event.part?.text || event.properties?.part?.text || '';
+            if (text.length > meta.content.length) {
+                meta.content = text;
+                updateCard(sid, meta);
+            }
+        } else if (event.type === 'session.idle' || event.type === 'message.completed') {
+            console.log(`[SSE] Completed: ${sid}`);
+            larkClient.im.message.patch({
+                path: { message_id: meta.message_id },
+                data: {
+                    content: JSON.stringify(CardManager.createOpenCodeCard('✅ 任务完成', meta.content || '任务结束', 'success'))
+                }
+            }).catch(err => console.error(`[SSE FINAL ERROR]`, err.message));
+            
+            storageManager.logMessage(meta.chat_id, 'bot', 'assistant', meta.content).catch(err => console.error('[STORAGE ERROR]', err.message));
+            activeSessions.delete(sid);
+        }
+    }, (err) => {
+        console.error('[SSE CONNECTION ERROR]', err.message);
+    });
+
+    startWS(config, dispatcher);
+    console.log(`[READY] Gateway is listening...`);
+}
+
+async function stopProcess() {
+    if (fs.existsSync(pidFile)) {
+        const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
+        try {
+            process.kill(pid, 'SIGTERM');
+            let count = 0;
+            while (count < 10) {
+                try {
+                    process.kill(pid, 0);
+                    await new Promise(r => setTimeout(r, 500));
+                    count++;
+                } catch (e) {
+                    break;
+                }
+            }
+            if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+            return true;
+        } catch (e) {
+            if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+            return false;
+        }
+    }
+    return false;
+}
+
+program
+    .command('start')
+    .description('启动服务')
+    .option('-d, --daemon', '后台运行')
+    .action(async (options) => {
+        if (options.daemon) {
+            if (fs.existsSync(pidFile)) {
+                const pid = fs.readFileSync(pidFile, 'utf8');
+                try {
+                    process.kill(parseInt(pid), 0);
+                    console.log(chalk.yellow(`服务已运行 (PID: ${pid})`));
+                    return;
+                } catch (e) {
+                    fs.unlinkSync(pidFile);
+                }
+            }
+            const out = fs.openSync(logFile, 'a');
+            const err = fs.openSync(errorLogFile, 'a');
+            const child = spawn(process.argv[0], [process.argv[1], 'internal-run'], {
+                detached: true,
+                stdio: ['ignore', out, err]
+            });
+            fs.writeFileSync(pidFile, child.pid.toString());
+            child.unref();
+            console.log(chalk.green(`✔ 已后台启动 (PID: ${child.pid})`));
+        } else {
+            console.log(boxen(chalk.green('OpenCode Channels'), { padding: 1, borderStyle: 'double' }));
+            await runServer();
+        }
+    });
+
+program
+    .command('stop')
+    .description('停止服务')
+    .action(async () => {
+        const spinner = ora('停止中...').start();
+        if (await stopProcess()) spinner.succeed('已停止');
+        else spinner.fail('未运行');
+    });
+
+program
+    .command('restart')
+    .description('重启服务')
+    .action(async () => {
+        await stopProcess();
+        const child = spawn(process.argv[0], [process.argv[1], 'start', '--daemon'], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        fs.writeFileSync(pidFile, child.pid.toString());
+        child.unref();
+        console.log(chalk.green(`✔ 已重启`));
+    });
+
+program
+    .command('setup')
+    .description('初始化配置')
+    .action(async () => {
+        const security = new SecurityManager(ws.config, ws.storage);
+        const configData = security.getConfig();
+        const answers = await inquirer.prompt([
+            { name: 'appId', message: '飞书 App ID:', default: configData.feishu.appId },
+            { name: 'appSecret', message: '飞书 App Secret:', default: configData.feishu.appSecret },
+            { name: 'proxy', message: 'HTTP 代理 (可选):', default: configData.proxy }
+        ]);
+        configData.feishu.appId = answers.appId;
+        configData.feishu.appSecret = answers.appSecret;
+        configData.proxy = answers.proxy;
+        security.saveConfig(configData);
+
+        console.log(chalk.cyan('\n' + '━'.repeat(40)));
+        console.log(chalk.bold('⚠️ 提醒:'));
+        console.log('1. 事件订阅选 WebSocket');
+        console.log('2. 添加事件: im.message.receive_v1');
+        console.log('3. 权限: im:message, im:message:send_as_bot');
+        console.log('4. 必须发布新版本！');
+        console.log(chalk.cyan('━'.repeat(40) + '\n'));
+
+        const { startNow } = await inquirer.prompt([
+            { type: 'confirm', name: 'startNow', message: '是否立即启动？', default: true }
+        ]);
+
+        if (startNow) {
+            await stopProcess();
+            const child = spawn(process.argv[0], [process.argv[1], 'start', '--daemon'], {
+                detached: true,
+                stdio: 'ignore'
+            });
+            fs.writeFileSync(pidFile, child.pid.toString());
+            child.unref();
+            console.log(chalk.green(`✔ 已后台启动 (PID: ${child.pid})`));
+        }
+    });
+
+program
+    .command('whitelist')
+    .description('管理授权')
+    .argument('[action]', 'add|list|remove', 'list')
+    .argument('[id]', 'User ID')
+    .argument('[role]', 'admin|user', 'user')
+    .action((action, id, role) => {
+        const security = new SecurityManager(ws.config, ws.storage);
+        const configData = security.getConfig();
+        if (action === 'list') {
+            console.log(chalk.bold('\n授权列表:'));
+            if (configData.admin) console.log(chalk.blue(`[ADMIN] ${configData.admin}`));
+            if (configData.whitelist) configData.whitelist.forEach(uid => {
+                if (uid !== configData.admin) console.log(` - ${uid}`);
+            });
+            const logPath = path.join(ws.storage, 'unauthorized.log');
+            if (fs.existsSync(logPath)) {
+                const unauthorized = fs.readFileSync(logPath, 'utf8').trim();
+                if (unauthorized) {
+                    console.log(chalk.red('\n未授权记录:'));
+                    console.log(unauthorized);
+                }
+            }
+        } else if (action === 'add' && id) {
+            if (role === 'admin') {
+                security.setAdmin(id);
+                console.log(chalk.green(`已设置 ${id} 为管理员`));
+            } else {
+                if (security.addToWhitelist(id)) console.log(chalk.green(`已授权 ${id}`));
+                else console.log(chalk.yellow(`${id} 已在授权列表中`));
+            }
+        } else if (action === 'remove' && id) {
+            const config = security.getConfig();
+            if (config.whitelist) {
+                config.whitelist = config.whitelist.filter(uid => uid !== id);
+                if (config.admin === id) config.admin = null;
+                security.saveConfig(config);
+                console.log(chalk.green(`已移除 ${id} 的授权`));
+            }
+        }
+    });
+
+program
+    .command('internal-run', { hidden: true })
+    .action(async () => {
+        await runServer();
+    });
+
+program.parse();

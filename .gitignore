@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Runtime data
+logs/
+storage/
+*.log
+
+# Local configuration
+config.json
+.env
+
+# Test scripts
+test-*.js
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
